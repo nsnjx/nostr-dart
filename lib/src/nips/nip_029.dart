@@ -1,6 +1,7 @@
-import 'dart:math';
+import '../event.dart';
+import 'nip_001.dart';
+import 'nip_010.dart';
 
-import 'package:nostr_core_dart/nostr.dart';
 
 /// Relay-based Groups
 class Nip29 {
@@ -15,6 +16,8 @@ class Nip29 {
 
     String groupId = '', name = '', picture = '', about = '';
     bool private = true, closed = true;
+    int subscriptionAmount = 0;
+    String groupWalletId = '';
     for (var tag in event.tags) {
       if (tag[0] == "d") {
         groupId = tag[1];
@@ -28,16 +31,22 @@ class Nip29 {
       if (tag[0] == "about") {
         about = tag[1];
       }
-      if (tag[0] == "public") {
+      if (tag[0] == "public" || tag[0] == "open") {
         private = false;
       }
       if (tag[0] == "open") {
         closed = false;
       }
+      if (tag[0] == "subscription_amount" && tag.length > 1) {
+        subscriptionAmount = int.tryParse(tag[1]) ?? 0;
+      }
+      if (tag[0] == "group_wallet_id" && tag.length > 1) {
+        groupWalletId = tag[1];
+      }
     }
     String id = '$fromRelay\'$groupId';
     return Group(id, fromRelay, event.pubkey, groupId, private, closed, [], name, about, picture,
-        null, [], 0, 0, null);
+        null, [], 0, 0, subscriptionAmount, groupWalletId, null);
   }
 
   static String? getGroupIdFromEvent(Event event) {
@@ -81,14 +90,21 @@ class Nip29 {
     return regex.hasMatch(input);
   }
 
-  static List<String> decodeGroupMembers(Event event) {
+  static List<GroupMember> decodeGroupMembers(Event event) {
     if (event.kind != 39002) {
       throw Exception("${event.kind} is not nip29 compatible");
     }
 
-    List<String> members = [];
+    List<GroupMember> members = [];
     for (var tag in event.tags) {
-      if (tag[0] == "p" && isHexadecimalString(tag[1])) members.add(tag[1]);
+      if (tag[0] == "p" && isHexadecimalString(tag[1])) {
+        // Parse subscription expiry timestamp from tag[2] if present
+        int? subscriptionExpiryTimestamp;
+        if (tag.length > 2 && tag[2].isNotEmpty) {
+          subscriptionExpiryTimestamp = int.tryParse(tag[2]);
+        }
+        members.add(GroupMember(tag[1], subscriptionExpiryTimestamp));
+      }
     }
     return members;
   }
@@ -159,6 +175,8 @@ class Nip29 {
     List<String> users = [], permissions = [];
     String groupId = '', name = '', about = '', picture = '', eventId = '';
     bool private = false, closed = false;
+    int subscriptionAmount = 0;
+    String groupWalletId = '';
     for (var tag in event.tags) {
       if (tag[0] == "h") groupId = tag[1];
       if (tag[0] == "p") users.add(tag[1]);
@@ -169,6 +187,12 @@ class Nip29 {
       if (tag[0] == "e") eventId = tag[1];
       if (tag[0] == "private") private = true;
       if (tag[0] == "closed") closed = true;
+      if (tag[0] == "subscription_amount" && tag.length > 1) {
+        subscriptionAmount = int.tryParse(tag[1]) ?? 0;
+      }
+      if (tag[0] == "group_wallet_id" && tag.length > 1) {
+        groupWalletId = tag[1];
+      }
     }
     List<String> previous = getPrevious(event.tags);
     return GroupModeration(
@@ -187,7 +211,9 @@ class Nip29 {
         name: name,
         about: about,
         picture: picture,
-        pinned: '');
+        pinned: '',
+        subscriptionAmount: subscriptionAmount,
+        groupWalletId: groupWalletId);
   }
 
   static Future<Event> encodeGroupNote(
@@ -336,23 +362,18 @@ class Nip29 {
         groupId, GroupActionKind.removeUser, content, tags, previous, pubkey, privkey);
   }
 
-  static Future<Event> encodeEditMetadata(
-      String groupId,
-      String name,
-      String about,
-      String picture,
-      String content,
-      bool closed,
-      bool private,
-      List<String> previous,
-      String pubkey,
-      String privkey) async {
+  static Future<Event> encodeEditMetadata(String groupId, String name, String about, String picture,
+      String content, List<String> previous, String pubkey, String privkey, {int subscriptionAmount = 0, String groupWalletId = ''}) async {
     List<List<String>> tags = [];
     tags.add(['name', name]);
     tags.add(['about', about]);
     tags.add(['picture', picture]);
-    private ? tags.add(['private']) : tags.add(['public']);
-    closed ? tags.add(['closed']) : tags.add(['open']);
+    if (subscriptionAmount > 0) {
+      tags.add(['subscription_amount', subscriptionAmount.toString()]);
+    }
+    if (groupWalletId.isNotEmpty) {
+      tags.add(['group_wallet_id', groupWalletId]);
+    }
     return _encodeGroupAction(
         groupId, GroupActionKind.editMetadata, content, tags, previous, pubkey, privkey);
   }
@@ -433,17 +454,9 @@ class Nip29 {
         return encodeRemoveUser(moderation.groupId, moderation.users, moderation.content,
             moderation.previous, pubkey, privkey);
       case GroupActionKind.editMetadata:
-        return encodeEditMetadata(
-            moderation.groupId,
-            moderation.name,
-            moderation.about,
-            moderation.picture,
-            moderation.content,
-            moderation.closed,
-            moderation.private,
-            moderation.previous,
-            pubkey,
-            privkey);
+        return encodeEditMetadata(moderation.groupId, moderation.name, moderation.about,
+            moderation.picture, moderation.content, moderation.previous, pubkey, privkey,
+            subscriptionAmount: moderation.subscriptionAmount, groupWalletId: moderation.groupWalletId);
       case GroupActionKind.addPermission:
         return encodeAddPermission(moderation.groupId, moderation.users, moderation.permissions,
             moderation.content, moderation.previous, pubkey, privkey);
@@ -462,7 +475,6 @@ class Nip29 {
       case GroupActionKind.createInvite:
         return encodeCreateInvite(
             moderation.groupId, moderation.inviteCode, moderation.previous, pubkey, privkey);
-        break;
     }
   }
 }
@@ -549,6 +561,27 @@ class GroupAdmin {
   }
 }
 
+class GroupMember {
+  String pubkey;
+  int? subscriptionExpiryTimestamp;
+
+  GroupMember(this.pubkey, this.subscriptionExpiryTimestamp);
+
+  factory GroupMember.fromJson(List<dynamic> json) {
+    String pubkey = json[0];
+    int? subscriptionExpiryTimestamp = json.length > 2 ? int.tryParse(json[2]) : null;
+    return GroupMember(pubkey, subscriptionExpiryTimestamp);
+  }
+
+  List<dynamic> toJson() {
+    List<dynamic> result = [pubkey];
+    if (subscriptionExpiryTimestamp != null) {
+      result.add(subscriptionExpiryTimestamp);
+    }
+    return result;
+  }
+}
+
 /// groups info
 class Group {
   String id; //<host>'<group-id>
@@ -565,6 +598,8 @@ class Group {
   List<String> members;
   int level; // group level
   int point; // group point
+  int subscriptionAmount; // subscription amount in satoshis
+  String groupWalletId; // LNbits wallet ID for group payments
   /// Clients MAY add additional metadata fields.
   Map<String, dynamic>? additional;
 
@@ -584,6 +619,8 @@ class Group {
       this.members,
       this.level,
       this.point,
+      this.subscriptionAmount,
+      this.groupWalletId,
       this.additional);
 }
 
@@ -639,6 +676,8 @@ class GroupModeration {
   String picture;
   String pinned;
   String inviteCode;
+  int subscriptionAmount;
+  String groupWalletId;
 
   GroupModeration(
       {this.moderationId = '',
@@ -657,7 +696,9 @@ class GroupModeration {
       this.about = '',
       this.picture = '',
       this.pinned = '',
-      this.inviteCode = ''});
+      this.inviteCode = '',
+      this.subscriptionAmount = 0,
+      this.groupWalletId = ''});
 
   factory GroupModeration.addUser(String groupId, List<String> addUser, String reason) {
     return GroupModeration(
@@ -673,7 +714,7 @@ class GroupModeration {
   }
 
   factory GroupModeration.editMetadata(String groupId, String name, String about, String picture,
-      bool closed, bool private, String reason) {
+      bool closed, bool private, String reason, {int subscriptionAmount = 0, String groupWalletId = ''}) {
     return GroupModeration(
         groupId: groupId,
         name: name,
@@ -682,6 +723,8 @@ class GroupModeration {
         content: reason,
         closed: closed,
         private: private,
+        subscriptionAmount: subscriptionAmount,
+        groupWalletId: groupWalletId,
         actionKind: GroupActionKind.editMetadata);
   }
 
