@@ -363,7 +363,7 @@ class Nip29 {
   }
 
   static Future<Event> encodeEditMetadata(String groupId, String name, String about, String picture,
-      String content, List<String> previous, String pubkey, String privkey, {int subscriptionAmount = 0, String groupWalletId = ''}) async {
+      String content, List<String> previous, String pubkey, String privkey, {int subscriptionAmount = 0, String groupWalletId = '', bool? closed, bool? private}) async {
     List<List<String>> tags = [];
     tags.add(['name', name]);
     tags.add(['about', about]);
@@ -373,6 +373,21 @@ class Nip29 {
     }
     if (groupWalletId.isNotEmpty) {
       tags.add(['group_wallet_id', groupWalletId]);
+    }
+    // Add private/closed tags if provided
+    if (private != null) {
+      if (private) {
+        tags.add(['private']);
+      } else {
+        tags.add(['public']);
+      }
+    }
+    if (closed != null) {
+      if (closed) {
+        tags.add(['closed']);
+      } else {
+        tags.add(['open']);
+      }
     }
     return _encodeGroupAction(
         groupId, GroupActionKind.editMetadata, content, tags, previous, pubkey, privkey);
@@ -456,7 +471,8 @@ class Nip29 {
       case GroupActionKind.editMetadata:
         return encodeEditMetadata(moderation.groupId, moderation.name, moderation.about,
             moderation.picture, moderation.content, moderation.previous, pubkey, privkey,
-            subscriptionAmount: moderation.subscriptionAmount, groupWalletId: moderation.groupWalletId);
+            subscriptionAmount: moderation.subscriptionAmount, groupWalletId: moderation.groupWalletId,
+            closed: moderation.closed, private: moderation.private);
       case GroupActionKind.addPermission:
         return encodeAddPermission(moderation.groupId, moderation.users, moderation.permissions,
             moderation.content, moderation.previous, pubkey, privkey);
