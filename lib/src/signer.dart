@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'package:nostr_core_dart/nostr.dart';
 
-enum SignerApplication { androidSigner, remoteSigner, none }
+enum SignerApplication { androidSigner, remoteSigner, nip07Signer, none }
 
 typedef SignEventHandle = Future<Event> Function(String eventString);
 typedef Nip04EncryptEventHandle = Future<String?> Function(String plainText, String peerPubkey);
@@ -28,6 +28,8 @@ class SignerHelper {
         return SignerApplication.androidSigner;
       case 'remoteSigner':
         return SignerApplication.remoteSigner;
+      case 'nip07Signer':
+        return SignerApplication.nip07Signer;
       default:
         return SignerApplication.none;
     }
@@ -39,6 +41,8 @@ class SignerHelper {
         return 'androidSigner';
       case SignerApplication.remoteSigner:
         return 'remoteSigner';
+      case SignerApplication.nip07Signer:
+        return 'nip07Signer';
       default:
         return privkey;
     }
@@ -57,6 +61,7 @@ class SignerHelper {
         String? sign = map?['result'] ?? map?['signature'];
         return sign;
       case SignerApplication.remoteSigner:
+      case SignerApplication.nip07Signer:
       default:
         return null;
     }
@@ -75,6 +80,7 @@ class SignerHelper {
         }
         return event;
       case SignerApplication.remoteSigner:
+      case SignerApplication.nip07Signer:
         return SignerHelper.sharedInstance.signEventHandle?.call(eventString);
       default:
         return null;
@@ -94,6 +100,7 @@ class SignerHelper {
         }
         return plainText;
       case SignerApplication.remoteSigner:
+      case SignerApplication.nip07Signer:
         return SignerHelper.sharedInstance.nip04encryptEventHandle?.call(plainText, peerPubkey);
       default:
         return null;
@@ -113,6 +120,7 @@ class SignerHelper {
         }
         return encryptedText;
       case SignerApplication.remoteSigner:
+      case SignerApplication.nip07Signer:
         return SignerHelper.sharedInstance.nip04decryptEventHandle?.call(encryptedText, peerPubkey);
       default:
         return null;
@@ -132,6 +140,7 @@ class SignerHelper {
         }
         return plainText;
       case SignerApplication.remoteSigner:
+      case SignerApplication.nip07Signer:
         return SignerHelper.sharedInstance.nip44encryptEventHandle?.call(plainText, peerPubkey);
       default:
         return null;
@@ -151,6 +160,7 @@ class SignerHelper {
         }
         return encryptedText;
       case SignerApplication.remoteSigner:
+      case SignerApplication.nip07Signer:
         return SignerHelper.sharedInstance.nip44decryptEventHandle?.call(encryptedText, peerPubkey);
       default:
         return null;
